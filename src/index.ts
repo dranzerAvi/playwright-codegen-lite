@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { Frame, chromium } from "playwright";
 import type { Action, ActionInContext, FrameDescription } from "./types";
 import { rewriteLines } from "./utils";
@@ -6,7 +7,10 @@ import * as injectedScriptSource from "./vendor/generated/injectedScriptSource";
 import * as recorderSource from "./vendor/generated/recorderSource";
 import { JavaScriptLanguageGenerator } from "./vendor/javascriptBundle";
 
-const browserUrl = "https://demo.playwright.dev/todomvc";
+const browserUrl = process.argv[2] || "https://demo.playwright.dev/todomvc";
+let generatedCode = '';
+
+const apiEndpoint = "https://staging.flyingraccoon.tech/sdk/event/log";
 
 async function main() {
   const browser = await chromium.launch({ headless: false });
@@ -71,6 +75,7 @@ async function main() {
     generator.addAction(actionInContext);
     const output = generator.generateStructure(languageGenerator as any).text;
     rewriteLines(output.split("\n"));
+    generatedCode = output;
   }
 
   await context.exposeBinding(
@@ -112,6 +117,36 @@ async function main() {
   await injectScripts();
   // TODO: use onPage function to also add an action for the code generator
   page.on("framenavigated", injectScripts);
+
+  process.on('exit', async () =>{
+    //TODO: Call api to save the script
+
+   
+    const requestBodyData = {
+      eventName: "TASK_SUCCESS",    
+      taskId: generatedCode,
+      journeyId: "",
+      InTargetGroup: true
+    };
+
+    try {
+      await axios.post(apiEndpoint, requestBodyData, {
+        headers: {
+          'secret-key': 'S2JhNDA2MWUtZjU0MS00MzMyLWExN2ItMjI3YmNjMzdlOTAy',
+          'user-id': 'raccoon',
+          'sdk': '0.0.4',
+          'platform': 'Android',
+          'app-version': '1.0',
+          'android-version': '1.1.1'
+        }
+      });
+      console.log('Script saved successfully');
+    } catch (error) {
+      console.error('Failed to save script:', error);
+    }
+
+    console.log('Generated Code:\n', generatedCode);
+  });
 }
 
 main();
