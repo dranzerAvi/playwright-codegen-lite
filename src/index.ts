@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { Frame, chromium } from "playwright";
 import type { Action, ActionInContext, FrameDescription } from "./types";
 import { rewriteLines } from "./utils";
@@ -5,8 +6,17 @@ import { CodeGenerator } from "./vendor/codeGeneratorBundle";
 import * as injectedScriptSource from "./vendor/generated/injectedScriptSource";
 import * as recorderSource from "./vendor/generated/recorderSource";
 import { JavaScriptLanguageGenerator } from "./vendor/javascriptBundle";
+import fs from 'fs';
+import path from 'path';
 
-const browserUrl = "https://demo.playwright.dev/todomvc";
+
+const browserUrl = process.argv[2] || "https://demo.playwright.dev/todomvc";
+const outputDir = 'generated-scripts';
+const outputFileName = process.argv[3] || "generated_script.js";
+const outputFilePath = path.join(outputDir, outputFileName);
+let generatedCode = '';
+
+const apiEndpoint = "https://staging.flyingraccoon.tech/sdk/event/log";
 
 async function main() {
   const browser = await chromium.launch({ headless: false });
@@ -71,6 +81,14 @@ async function main() {
     generator.addAction(actionInContext);
     const output = generator.generateStructure(languageGenerator as any).text;
     rewriteLines(output.split("\n"));
+    generatedCode = output;
+
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    // Write the generated code to the file
+    fs.writeFileSync(outputFilePath, generatedCode, 'utf8');
   }
 
   await context.exposeBinding(
@@ -112,6 +130,48 @@ async function main() {
   await injectScripts();
   // TODO: use onPage function to also add an action for the code generator
   page.on("framenavigated", injectScripts);
+  process.on('SIGINT', async () => {
+    await handleExit();
+  });
+  
+  process.on('SIGTERM', async () => {
+    await handleExit();
+  });
+  
+  process.on('exit', async (code) => {
+    await handleExit();
+    console.log(`Process exited with code: ${code}`);
+  });
+  
+  async function handleExit() {
+    console.log('Handling process exit...');
+  
+    const requestBodyData = {
+      eventName: "TASK_SUCCESS",    
+      taskId: generatedCode,
+      journeyId: "",
+      InTargetGroup: true
+    };
+  
+    try {
+      console.log('Attempting to call API...');
+      await axios.post(apiEndpoint, requestBodyData, {
+        headers: {
+          'secret-key': 'S2JhNDA2MWUtZjU0MS00MzMyLWExN2ItMjI3YmNjMzdlOTAy',
+          'user-id': 'raccoon',
+          'sdk': '0.0.4',
+          'platform': 'Android',
+          'app-version': '1.0',
+          'android-version': '1.1.1'
+        }
+      });
+      console.log('Script saved successfully');
+    } catch (error) {
+      console.error('Failed to save script:', error);
+    }
+  
+    console.log('Generated Code:\n', generatedCode);
+  }
 }
 
 main();
